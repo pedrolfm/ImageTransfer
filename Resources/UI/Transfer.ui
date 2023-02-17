@@ -77,16 +77,16 @@
     </widget>
    </item>
    <item>
-    <widget class="QPushButton" name="serverButton">
+    <widget class="QLabel" name="statusLabel">
      <property name="text">
-      <string>Start Server</string>
+      <string>No openIGTLink server</string>
      </property>
     </widget>
    </item>
    <item>
-    <widget class="QLabel" name="statusLabel">
+    <widget class="QPushButton" name="serverButton">
      <property name="text">
-      <string>No openIGTLink server</string>
+      <string>Reset Server</string>
      </property>
     </widget>
    </item>
