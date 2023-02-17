@@ -394,23 +394,31 @@ class TransferLogic(ScriptedLoadableModuleLogic):
         num = len(files)
         files.sort()
 
-        loadedVolume_M = slicer.util.loadVolume(os.path.join(path, files[0]))
-        loadedVolume_P = slicer.util.loadVolume(os.path.join(path, files[1]))
-        origin = loadedVolume_M.GetOrigin()
+        ##loadedVolume_M = slicer.util.loadVolume(os.path.join(path, files[0]))
+        ##loadedVolume_P = slicer.util.loadVolume(os.path.join(path, files[1]))
+        ##origin = loadedVolume_M.GetOrigin()
         if (num % 2) == 0:
             for i in range(0,num):
                 if (i % 2) == 0:
-                    reader = vtk.vtkNrrdReader()
-                    reader.SetFileName(os.path.join(path, files[i]))
-                    reader.Update()
-                    loadedVolume_M.SetAndObserveImageData(reader.GetOutput())
-                    loadedVolume_M.SetOrigin(origin)
+                    # TODO: stop adding and removing nodes
+                    ##reader = vtk.vtkNrrdReader()
+                    ##reader.SetFileName(os.path.join(path, files[i]))
+                    ##reader.Update()
+                    ##loadedVolume_M.SetAndObserveImageData(reader.GetOutput())
+                    ##loadedVolume_M.SetOrigin(origin)
 
-                    reader1 = vtk.vtkNrrdReader()
-                    reader1.SetFileName(os.path.join(path, files[i+1]))
-                    reader1.Update()
-                    loadedVolume_P.SetAndObserveImageData(reader1.GetOutput())
+                    ##reader1 = vtk.vtkNrrdReader()
+                    ##reader1.SetFileName(os.path.join(path, files[i+1]))
+                    ##reader1.Update()
+                    ##loadedVolume_P.SetAndObserveImageData(reader1.GetOutput())
+
+                    loadedVolume_M = slicer.util.loadVolume(os.path.join(path,files[i]))
+                    loadedVolume_P = slicer.util.loadVolume(os.path.join(path,files[i+1]))
+                    loadedVolume_M.SetName("Magnitude")
+                    loadedVolume_P.SetName("Phase")
                     self.sendImages(loadedVolume_M,loadedVolume_P)
+                    slicer.mrmlScene.RemoveNode(loadedVolume_M)
+                    slicer.mrmlScene.RemoveNode(loadedVolume_P)
                     time.sleep(rate)
         else:
             print ("odd number of images!")
