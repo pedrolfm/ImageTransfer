@@ -2,11 +2,12 @@ import logging
 import os
 
 import vtk
-
+import SimpleITK as sitk
 import slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 import time
+import qt
 
 #
 # Transfer
@@ -144,12 +145,13 @@ class TransferWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Buttons
         self.ui.serverButton.connect('clicked(bool)', self.onServerButton)
         self.ui.sendButton.connect('clicked(bool)', self.onSendButton)
+        self.ui.sendAuto.connect('clicked(bool)', self.onSendAutomaticButton)
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
         
         # Create OpenIGTLink Server node and connection observers
-        self.setServer()
+        #self.setServer()
 
     def cleanup(self):
         """
@@ -308,17 +310,39 @@ class TransferWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def onDeactivated(self, caller, event):
         self.updateStatus()
 
+    def onSendAutomaticButton(self):
+        print("sending automatic")
+
+
+
+        self.ui.DirectoryButton.directory = os.path.join(os.path.dirname(__file__), 'images')
+
+        if self.ui.sameFile.checkState()==0:
+            self.logic.sendAuto(self.ui.DirectoryButton.directory,self.ui.transferRate.value)
+        else:
+            self.logic.sendAutoSameFile(self.ui.DirectoryButton.directory,self.ui.transferRate.value)
+
+
     def onServerButton(self):
-        try:
-            slicer.util.getNodesByClass('vtkMRMLIGTLConnectorNode')
-            if (self.cnode.GetStatus() == slicer.vtkMRMLIGTLConnectorNode.StateOff):
-                self.cnode.Start() #TODO: Check error
-                time.sleep(0.1)
-            else:
-                print('Server already running')
-            self.updateStatus()
-        except:
-            print('Error with OpenIGTLink server node')
+        if self.logic.openConnection():
+            self.ui.statusLabel.setStyleSheet("background-color: lightgreen;border: 1px solid black;")
+            self.ui.statusLabel.setText("   Server Running    ")
+        else:
+            self.ui.statusLabel.setStyleSheet("background-color: pink;border: 1px solid black;")
+            self.ui.statusLabel.setText("   error starting openIGTLink server    ")
+
+
+# Mariana's implementation:
+#        try:
+#            slicer.util.getNodesByClass('vtkMRMLIGTLConnectorNode')
+#            if (self.cnode.GetStatus() == slicer.vtkMRMLIGTLConnectorNode.StateOff):
+#                self.cnode.Start() #TODO: Check error
+#                time.sleep(0.1)#
+#            else:
+#                print('Server already running')
+#            self.updateStatus()
+#        except:
+#            print('Error with OpenIGTLink server node')
 
     def onSendButton(self):
         if self.logic.sendImages(self.ui.inputSelector1.currentNode(),self.ui.inputSelector2.currentNode()):
@@ -357,6 +381,63 @@ class TransferLogic(ScriptedLoadableModuleLogic):
 
          """
         print("just testing")
+
+
+    def sendAutoSameFile(self,path,rate):
+        #check number of files in the folder:
+        files_all = os.listdir(path)
+
+        #filter the data in case there are files that are not images
+        list1 = ['name']
+        files = [x for x in files_all if
+                       all(y in x for y in list1)]
+        num = len(files)
+        files.sort()
+
+        loadedVolume_M = slicer.util.loadVolume(os.path.join(path, files[0]))
+        loadedVolume_P = slicer.util.loadVolume(os.path.join(path, files[1]))
+        origin = loadedVolume_M.GetOrigin()
+        if (num % 2) == 0:
+            for i in range(0,num):
+                if (i % 2) == 0:
+                    reader = vtk.vtkNrrdReader()
+                    reader.SetFileName(os.path.join(path, files[i]))
+                    reader.Update()
+                    loadedVolume_M.SetAndObserveImageData(reader.GetOutput())
+                    loadedVolume_M.SetOrigin(origin)
+
+                    reader1 = vtk.vtkNrrdReader()
+                    reader1.SetFileName(os.path.join(path, files[i+1]))
+                    reader1.Update()
+                    loadedVolume_P.SetAndObserveImageData(reader1.GetOutput())
+                    self.sendImages(loadedVolume_M,loadedVolume_P)
+                    time.sleep(rate)
+        else:
+            print ("odd number of images!")
+
+
+    def sendAuto(self,path,rate):
+        #check number of files in the folder:
+        files_all = os.listdir(path)
+
+        #filter the data in case there are files that are not images
+        list1 = ['name']
+        files = [x for x in files_all if
+                       all(y in x for y in list1)]
+        num = len(files)
+        files.sort()
+
+        if (num % 2) == 0:
+            for i in range(0,num):
+                if (i % 2) == 0:
+                    loadedVolume_M = slicer.util.loadVolume(os.path.join(path,files[i]))
+                    loadedVolume_P = slicer.util.loadVolume(os.path.join(path,files[i+1]))
+                    self.sendImages(loadedVolume_M,loadedVolume_P)
+                    time.sleep(rate)
+        else:
+            print ("odd number of images!")
+
+
 
     def sendImages(self, image1, image2):
 
