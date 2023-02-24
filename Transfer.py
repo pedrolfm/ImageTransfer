@@ -10,7 +10,7 @@ import time
 import qt
 
 #
-# Transfer
+# Transfer Module
 #
 
 class Transfer(ScriptedLoadableModule):
@@ -26,12 +26,12 @@ class Transfer(ScriptedLoadableModule):
         self.parent.contributors = ["Pedro Moreira BWH"]  # TODO: replace with "Firstname Lastname (Organization)"
         # TODO: update with short description of the module and a link to online module documentation
         self.parent.helpText = """
-This module transfer images using openIGTLink
-"""
+        This module transfer images using openIGTLink
+        """
         # TODO: replace with organization, grant and thanks
         self.parent.acknowledgementText = """
-...
-"""
+        ...
+        """
 
         # Additional initialization step after application startup is complete
         slicer.app.connect("startupCompleted()", registerSampleData)
@@ -126,7 +126,7 @@ class TransferWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Create logic class. Logic implements all computations that should be possible to run
         # in batch mode, without a graphical user interface.
         self.logic = TransferLogic()
-        
+    
         # These connections ensure that we update parameter node when scene is closed
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
@@ -136,9 +136,6 @@ class TransferWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.inputSelector1.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
         self.ui.inputSelector2.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
 
-        # self.ui.inputSelector1.setMRMLScene(slicer.mrmlScene)
-        # self.ui.inputSelector2.setMRMLScene(slicer.mrmlScene)
-
         self.ui.statusLabel.setStyleSheet("background-color: pink;border: 1px solid black;")
         self.ui.statusLabel.setText("No OpenIGTLink server")
 
@@ -147,6 +144,13 @@ class TransferWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.sendButton.connect('clicked(bool)', self.onSendButton)
         self.ui.sendAuto.connect('clicked(bool)', self.onSendAutomaticButton)
 
+        # Initialize OpenIGTLink Server and create connection observers
+        if self.logic.openConnection():
+            self.addObserver(self.logic.cnode, slicer.vtkMRMLIGTLConnectorNode.ConnectedEvent, self.onConnected)
+            self.addObserver(self.logic.cnode, slicer.vtkMRMLIGTLConnectorNode.DisconnectedEvent, self.onDisconnected)
+            self.addObserver(self.logic.cnode, slicer.vtkMRMLIGTLConnectorNode.DeactivatedEvent, self.onDeactivated)
+        self.updateConnectionStatus()
+        
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
         
@@ -177,7 +181,11 @@ class TransferWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """
         Called just before the scene is closed.
         """
-        slicer.mrmlScene.RemoveNode(self.cnode)
+        self.removeObservers(self.onConnected)
+        self.removeObservers(self.onDisconnected)
+        self.removeObservers(self.onDeactivated)
+        self.logic.closeConnection()
+        
         # Parameter node will be reset, do not use it anymore
         self.setParameterNode(None)
 
@@ -188,6 +196,7 @@ class TransferWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # If this module is shown while the scene is closed then recreate a new parameter node immediately
         if self.parent.isEntered:
             self.initializeParameterNode()
+            self.logic.openConnection()
 
     def initializeParameterNode(self):
         """
@@ -197,9 +206,8 @@ class TransferWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # so that when the scene is saved and reloaded, these settings are restored.
 
         self.setParameterNode(self.logic.getParameterNode())
-
         volumeNodes = slicer.mrmlScene.GetNodesByClass("vtkMRMLScalarVolumeNode")
-
+       
         # Select default input nodes if nothing is selected yet to save a few clicks for the user
         if not self._parameterNode.GetNodeReference("InputVolume1"):
             firstVolumeNode = volumeNodes.GetItemAsObject(0)
@@ -249,6 +257,7 @@ class TransferWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # All the GUI updates are done
         self._updatingGUIFromParameterNode = False
+        self.updateConnectionStatus() #TODO: Not sure where this should be done. Maybe add connection node to logic parameter list
 
     def updateParameterNodeFromGUI(self, caller=None, event=None):
         """
@@ -265,26 +274,10 @@ class TransferWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self._parameterNode.SetNodeReferenceID("InputVolume2", self.ui.inputSelector2.currentNodeID)
 
         self._parameterNode.EndModify(wasModified)
-
-    def setServer(self):
-        self.cnode = slicer.vtkMRMLIGTLConnectorNode()
-        slicer.mrmlScene.AddNode(self.cnode)
-        self.cnode.SetServerPort(18944)
-        self.cnode.SetType(1)
-        self.cnode.SetName("ImageTransferOIGTLServer")
-        self.addObserver(self.cnode, slicer.vtkMRMLIGTLConnectorNode.ConnectedEvent, self.onConnected)
-        self.addObserver(self.cnode, slicer.vtkMRMLIGTLConnectorNode.DisconnectedEvent, self.onDisconnected)
-        self.addObserver(self.cnode, slicer.vtkMRMLIGTLConnectorNode.DeactivatedEvent, self.onDeactivated)
-        try:
-            self.cnode.Start() #TODO: Check error
-            time.sleep(0.1)
-            self.updateStatus()
-        except:
-            print('Error creating OpenIGTLink server node')
                     
-    def updateStatus(self):
+    def updateConnectionStatus(self):
         try:
-            status = self.cnode.GetState()
+            status = self.logic.cnode.GetState()
             if (status == slicer.vtkMRMLIGTLConnectorNode.StateOff):
                 self.ui.statusLabel.setStyleSheet("background-color: pink; border: 1px solid black;")
                 self.ui.statusLabel.setText("Server offline")
@@ -302,47 +295,29 @@ class TransferWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.statusLabel.setText("Error with OpenIGTLink server node")
             
     def onConnected(self, caller, event):
-        self.updateStatus()
+        self.updateConnectionStatus()
     
     def onDisconnected(self, caller, event):
-        self.updateStatus()
+        self.updateConnectionStatus()
 
     def onDeactivated(self, caller, event):
-        self.updateStatus()
+        self.updateConnectionStatus()
 
     def onSendAutomaticButton(self):
         print("sending automatic")
-
-
-
         self.ui.DirectoryButton.directory = os.path.join(os.path.dirname(__file__), 'images')
-
         if self.ui.sameFile.checkState()==0:
             self.logic.sendAuto(self.ui.DirectoryButton.directory,self.ui.transferRate.value)
         else:
             self.logic.sendAutoSameFile(self.ui.DirectoryButton.directory,self.ui.transferRate.value)
 
-
+    #TODO: Define if this will be kept or removed for UI
     def onServerButton(self):
         if self.logic.openConnection():
-            self.ui.statusLabel.setStyleSheet("background-color: lightgreen;border: 1px solid black;")
-            self.ui.statusLabel.setText("   Server Running    ")
+            pass
         else:
-            self.ui.statusLabel.setStyleSheet("background-color: pink;border: 1px solid black;")
-            self.ui.statusLabel.setText("   error starting openIGTLink server    ")
-
-
-# Mariana's implementation:
-#        try:
-#            slicer.util.getNodesByClass('vtkMRMLIGTLConnectorNode')
-#            if (self.cnode.GetStatus() == slicer.vtkMRMLIGTLConnectorNode.StateOff):
-#                self.cnode.Start() #TODO: Check error
-#                time.sleep(0.1)#
-#            else:
-#                print('Server already running')
-#            self.updateStatus()
-#        except:
-#            print('Error with OpenIGTLink server node')
+            print('Could not Restart Server')
+        self.updateConnectionStatus()
 
     def onSendButton(self):
         if self.logic.sendImages(self.ui.inputSelector1.currentNode(),self.ui.inputSelector2.currentNode()):
@@ -380,8 +355,7 @@ class TransferLogic(ScriptedLoadableModuleLogic):
             parameterNode.SetParameter("Invert", "false")
 
          """
-        print("just testing")
-
+        print('Logic module - Parameters initialization')
 
     def sendAutoSameFile(self,path,rate):
         #check number of files in the folder:
@@ -445,10 +419,8 @@ class TransferLogic(ScriptedLoadableModuleLogic):
         else:
             print ("odd number of images!")
 
-
-
+    # Send single pair of images
     def sendImages(self, image1, image2):
-
         if (self.cnode.GetState() == slicer.vtkMRMLIGTLConnectorNode.StateConnected):
             self.cnode.RegisterOutgoingMRMLNode(image2)
             self.cnode.PushNode(image2)
@@ -466,21 +438,38 @@ class TransferLogic(ScriptedLoadableModuleLogic):
             print('Connection not stablished yet')
             return False
 
+    # Create OpenIGTLink Server Node, if not created already
+    # Start server connection if not already running
     def openConnection(self):
         try:
-            slicer.util.getNodesByClass('vtkMRMLIGTLConnectorNode')
-            self.cnode = slicer.util.getNode('ImageTransferOIGTL*')
-            print(' - OpenIGTLink server already created -')
+            self.cnode = slicer.util.getNode('ImageTransferOIGTLServer')
+            print('OpenIGTLink server node already exists')
         except:
             self.cnode = slicer.vtkMRMLIGTLConnectorNode()
             slicer.mrmlScene.AddNode(self.cnode)
             self.cnode.SetServerPort(18944)
             self.cnode.SetType(1)
-            self.cnode.SetName("ImageTransferOIGTLServer")
-            self.cnode.Start()
-
+            self.cnode.SetName('ImageTransferOIGTLServer')
+        if (self.cnode.GetState() == slicer.vtkMRMLIGTLConnectorNode.StateOff):
+            try:
+                self.cnode.Start()
+            except:
+                print('Error starting OpenIGTLink server node')
+                return False
         return True
-
+            
+    # Close server connection
+    # Remove OpenIGTLink Server Node from mrmlScene
+    def closeConnection(self):
+        if self.cnode is not None:
+            try:
+                self.cnode.Stop()
+                slicer.mrmlScene.RemoveNode(self.cnode)
+                return True
+            except:
+                print('Error closing OpenIGTLink server node')
+                return False
+        
 
 #
 # TransferTest
@@ -530,5 +519,19 @@ class TransferTest(ScriptedLoadableModuleTest):
 
         logic = TransferLogic()
         # TODO: Push sample data to OpenIGTLink Server
-
-        self.delayDisplay('Test passed')
+        if logic.openConnection():
+            self.delayDisplay('Created server')
+            clientTimeout = 0
+            while True:
+                if (logic.cnode.GetState() != slicer.vtkMRMLIGTLConnectorNode.StateConnected):
+                    time.sleep(0.1)
+                    if (clientTimeout <= 100):
+                        clientTimeout += 1
+                        continue # Return to loop
+                    else: 
+                        self.delayDisplay('Client connection timeout')
+                        break   # Timeout
+                # Client connected
+                if logic.sendImages(inputVolume1, inputVolume2):
+                    self.delayDisplay('Test passed')
+                    break
